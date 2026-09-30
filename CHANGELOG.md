@@ -2,6 +2,14 @@
 
 All notable changes to CAUSTIC. Versions are tagged in git.
 
+## v0.4.0 — Playable
+
+The game exists. You can stage a launch, race a rival, win or lose, get paid,
+and spend the money in a garage on a car and a tuning build.
+
+Everything below v0.4.0 was an engine or a set of rules. Nothing before this
+version was playable by a human.
+
 ---
 
 ## v0.3.0 — The game layer

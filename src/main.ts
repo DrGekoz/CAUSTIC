@@ -445,6 +445,18 @@ class App {
     const entry = this.player.garage.find((g) => g.carId === this.activeCarId);
     if (entry) {
       applyRace(this.player, outcome, rival, entry, snap.playerTiming.launch?.grade === 'PERFECT');
+      // Advance the ladder when the player wins, so there is something to race
+      // next. Without this every race was against rival zero forever.
+      if (outcome.won) {
+        const idx = RIVALS.findIndex((r) => r.id === rival.id);
+        const nextIdx = Math.min(RIVALS.length - 1, idx + 1);
+        if (nextIdx !== idx) {
+          this.rivalSkill = nextIdx;
+          this.rivalCarId = RIVALS[nextIdx].carId;
+          this.rivalName = RIVALS[nextIdx].name;
+          this.rebuildRace();
+        }
+      }
     }
     this.raceSettled = true;
     this.garage?.setState(this.player, this.activeCarId);

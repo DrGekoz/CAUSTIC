@@ -1,7 +1,7 @@
 {
   "name": "caustic",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Photoreal drag racing. Runs on anything. Hand-written WebGL2 deferred renderer, procedural cars, branch-tree tuning.",
   "license": "MIT",

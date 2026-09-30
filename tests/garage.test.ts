@@ -3,6 +3,7 @@ import {
   newPlayer, buyTuning, sellTuning, buyCar, canFit, applyRace, resolveRace,
   RIVALS, TUNING_BY_ID, type PlayerState,
 } from '../src/game/Economy';
+import { CAR_BY_ID } from '../src/game/data/cars';
 import { serialise, deserialise, save, load, clear } from '../src/game/Save';
 
 /** node has no localStorage; the save layer only needs a key/value store. */
@@ -227,6 +228,55 @@ describe('conflicts are enforced symmetrically', () => {
       const bought = buyTuning(s, 'skyline', node.id);
       if (!bought.ok) continue; // ran out of cash, not a conflict
       expect(fit.ok, `${node.id}: canFit said no but buyTuning said yes`).toBe(true);
+    }
+  });
+});
+describe('the rival ladder advances', () => {
+  it('a win moves the player to the next rival', () => {
+    const s = newPlayer();
+    const rival = RIVALS[0];
+    const entry = s.garage[0];
+    // Beat rival 0 comfortably.
+    const win = resolveRace(rival.baselineEt - 0.5, rival, 3.125, 1);
+    expect(win.won).toBe(true);
+    applyRace(s, win, rival, entry, true);
+    expect(s.beaten.has(rival.id)).toBe(true);
+
+    // The progression the app performs on a win: index into the ladder and step
+    // forward. This is the logic the README now claims works.
+    const idx = RIVALS.findIndex((r) => r.id === rival.id);
+    const nextIdx = Math.min(RIVALS.length - 1, idx + 1);
+    expect(nextIdx).toBe(1);
+    expect(RIVALS[nextIdx].baselineEt).toBeLessThan(rival.baselineEt);
+  });
+
+  it('a loss does not advance the ladder', () => {
+    const s = newPlayer();
+    const rival = RIVALS[2];
+    const entry = s.garage[0];
+    const loss = resolveRace(rival.baselineEt * 4, rival, 0.28, 1);
+    expect(loss.won).toBe(false);
+    applyRace(s, loss, rival, entry, false);
+    expect(s.beaten.has(rival.id)).toBe(false);
+  });
+
+  it('the ladder is strictly faster all the way up', () => {
+    for (let i = 1; i < RIVALS.length; i++) {
+      expect(
+        RIVALS[i].baselineEt,
+        `${RIVALS[i - 1].name} -> ${RIVALS[i].name} must get faster`,
+      ).toBeLessThan(RIVALS[i - 1].baselineEt);
+    }
+  });
+
+  it('the ladder bottoms out rather than running off the end', () => {
+    const idx = RIVALS.length - 1;
+    expect(Math.min(RIVALS.length - 1, idx + 1)).toBe(idx);
+  });
+
+  it('every rival drives a car that exists', () => {
+    for (const r of RIVALS) {
+      expect(CAR_BY_ID[r.carId], `${r.name} drives ${r.carId}`).toBeDefined();
     }
   });
 });

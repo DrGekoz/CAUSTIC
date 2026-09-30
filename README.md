@@ -7,8 +7,9 @@
 A browser-native 1/8-mile drag racer on a hand-written WebGL2 deferred renderer.
 No 3D framework. No backend. No accounts. One runtime dependency.
 
-[![status](https://img.shields.io/badge/status-in%20development-amber)](https://github.com/DrGekoz/CAUSTIC)
-[![tests](https://img.shields.io/badge/tests-95%20passing-brightgreen)](https://github.com/DrGekoz/CAUSTIC/actions)
+[![status](https://img.shields.io/badge/status-playable-brightgreen)](https://github.com/DrGekoz/CAUSTIC)
+[![tests](https://img.shields.io/badge/tests-139%20passing-brightgreen)](https://github.com/DrGekoz/CAUSTIC/actions)
+[![release](https://img.shields.io/badge/release-v0.4.0-blue)](https://github.com/DrGekoz/CAUSTIC/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
@@ -38,18 +39,52 @@ a $70,000 car with a bad one.
 | **Renderer** | Hand-written WebGL2 deferred: G-buffer ×3, GTAO, GGX + clearcoat, SSR, half-res volumetrics, TAA, Karis-averaged bloom, ACES. Four quality tiers. |
 | **Cars** | 12 procedural cars, 2,324 triangles each, 0.39 MB for the whole roster. Loomed in code from 17 cross-sections. |
 | **Game** | Launch window, 34-node mutually exclusive tuning tree, 12-rival authored ladder, cash/XP/level/resale economy. |
+| **Playing** | Keyboard and touch input, race loop with per-lane beam timing, garage with 12 cars and the full tuning tree, localStorage saves. |
 
-**95 tests, all green.** The render tests run headless Chrome against a real GL
+**139 tests, all green.** The render tests run headless Chrome against a real GL
 context and scrape the console for `INVALID_`/feedback-loop/compile failures —
 because a dropped draw is silent, and a car with no wheels passes every
-assertion you don't write by hand.
+assertion you don't write by hand. The production bundle is also built, served
+from disk and raced to the finish in CI, because the dev server hides failures
+that only appear once the code is minified.
+
+## How to play
+
+| | |
+|---|---|
+| **Hold** `W` / `↑` | Throttle |
+| **Hold** `L` | Clutch — stage the launch |
+| **Release** `L` | Dump the clutch |
+| `Space` | Shift up |
+| `R` | Race again |
+| `G` | Garage |
+
+Stage your revs into the **PERFECT** band, dump, and hold on. `T` hands you the
+clutch manually if the car is too eager for you. Touch controls appear
+automatically on a phone.
+
+The mechanic, measured from the simulation rather than asserted:
+
+| launch | payout |
+|---|---|
+| bog | 0.28x |
+| poor | 0.62x |
+| good | 1.00x |
+| great | 1.90x |
+| **perfect** | **3.13x** |
+| blown | 0.44x |
+
+That is 11:1 on the *same opponent*, and it is why launch skill beats purchased
+power for the whole first hour.
 
 ## What is not built yet
 
-Being straight about this: **the game is not playable.** There is no race loop, no
-input handling, no garage/shop UI, no save system and no audio. What exists is the
-engine (physics + renderer + economy) and a scene that renders correctly with a
-demo autopilot driving it. See [`plan.md`](./plan.md) for the full build phases.
+Being straight about this: **there is no audio at all** — the only sound is the fan
+on your GPU. The rival ladder advances when you win, so there is always someone
+faster to chase, but there is no choice of opponent and no career structure
+around it. Cars are also still visibly crude up close: the silhouette and the wheels
+are right, the paint response is not. See [`plan.md`](./plan.md) for the full
+build phases.
 
 ## Why it looks the way it does
 
