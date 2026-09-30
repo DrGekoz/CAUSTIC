@@ -19,7 +19,7 @@ export const NIGHT_GRADE: Partial<FrameSettings> = {
   vignette: 0.3,
   grain: 0.018,
   aberration: 0.002,
-  volumetricDensity: 0.45,
+  volumetricDensity: 0.4,
   volumetricScatter: 0.9,
   fogColor: [0.075, 0.085, 0.11],
   ambientSky: [0.10, 0.125, 0.175],

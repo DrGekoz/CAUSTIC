@@ -36,6 +36,12 @@ class App {
   specs: CarSpec[] = [];
   gpu: Record<string, GPUMesh> = {};
   carMeshes: GPUMesh[] = [];
+  /** Integrated wheel rotation per wheel, radians. */
+  wheelSpin: Float32Array | null = null;
+  wheelMesh: GPUMesh | null = null;
+  wheelOffsets: Array<Array<[number, number, number]>> = [];
+  wheelMats: Float32Array[] = [];
+  wheelNorms: Float32Array[] = [];
   lampMesh: GPUMesh | null = null;
   lampMats: Float32Array[] = [];
   lampNorms: Float32Array[] = [];
@@ -100,11 +106,24 @@ class App {
         const bar = buildLampBar(spec.width * 0.32, 0.09);
         this.lampMesh = new GPUMesh(gl, bar.positions, bar.normals, bar.uvs, bar.indices);
       }
+      // The wheel mesh was generated all along but never uploaded, so no
+      // capture has ever shown a wheel -- which is most of why the cars read
+      // as unrecognisable blobs.
+      if (!this.wheelMesh) {
+        this.wheelMesh = new GPUMesh(
+          gl, built.wheel.positions, built.wheel.normals, built.wheel.uvs, built.wheel.indices,
+        );
+      }
+      this.wheelOffsets.push(built.wheelOffsets.map((o) => [o[0], o[1], o[2]] as [number, number, number]));
       this.vehicles.push(new Vehicle(toVehicleConfig(spec)));
       this.modelMats.push(new Float32Array(16));
       this.normalMats.push(new Float32Array(9));
       this.lampMats.push(new Float32Array(16));
       this.lampNorms.push(new Float32Array(9));
+      for (let w = 0; w < 4; w++) {
+        this.wheelMats.push(new Float32Array(16));
+        this.wheelNorms.push(new Float32Array(9));
+      }
     }
     for (const v of this.vehicles) v.reset(1);
   }
@@ -142,7 +161,7 @@ class App {
     return { ...NO_INPUT, throttle: 1 };
   }
 
-  buildDrawList(): void {
+  buildDrawList(dtReal: number): void {
     const items = this.items;
     items.length = 0;
 
@@ -208,6 +227,51 @@ class App {
         Math.min(1, Math.abs(wheelSpin) * 0.5),
       );
 
+      // Wheels. The car body is parented by a single model matrix; each wheel
+      // needs its own, because it also carries a steer angle on the front axle
+      // and a spin angle on all four. Without these the cars read as floating
+      // slabs.
+      if (this.wheelMesh) {
+        const offsets = this.wheelOffsets[i];
+        // No steering in a drag race: the car tracks the lane centre. The
+      // small yaw term comes from the vehicle's lateral dynamics, not input.
+      const steer = Math.max(-0.08, Math.min(0.08, v.lateralSpeed * 0.05));
+        for (let w = 0; w < 4; w++) {
+          const off = offsets[w];
+          if (!off) continue;
+          const isFront = w < 2;
+          // Accumulate real wheel rotation from the simulated angular velocity,
+          // so a spinning wheel is visibly spinning.
+          if (!this.wheelSpin) this.wheelSpin = new Float32Array(this.wheelMats.length);
+          const slot = i * 4 + w;
+          const ws = v.wheels?.[w];
+          if (ws) this.wheelSpin[slot] += ws.omega * dtReal;
+          const wm = this.wheelMats[i * 4 + w];
+          const wn = this.wheelNorms[i * 4 + w];
+          mat4.identity(wm);
+          // wheelOffsets are in car-local space: x = side, y = height, z = along.
+          const lx = off[0];
+          const lz = off[2];
+          const c = Math.cos(yaw);
+          const sn = Math.sin(yaw);
+          const wx = lane + (lx * c + lz * sn);
+          const wz = z + (-lx * sn + lz * c);
+          mat4.translate(wm, wm, [wx, off[1], wz]);
+          mat4.rotateY(wm, wm, yaw);
+          if (isFront) mat4.rotateY(wm, wm, steer);
+          // Spin about the wheel's own axle, which is local X after the yaw.
+          mat4.rotateX(wm, wm, this.wheelSpin[slot] ?? 0);
+          mat3.normalFromMat4(wn as unknown as mat3, wm as unknown as mat4);
+          // Rubber: dark, low clearcoat, and the slip term makes it sheen and
+          // warm under wheelspin.
+          // Slip and heat come straight from the tyre model, so the rubber
+          // sheen and the smoke threshold track the simulation.
+          const slipRatio = Math.min(1, Math.abs(ws?.slipRatio ?? 0) * 0.5);
+          push(this.wheelMesh, wm, wn, 6, [0.045, 0.045, 0.05], 0.0, 0.72,
+            [0, 0, 0], 0, 0, slipRatio);
+        }
+      }
+
       // Brake-light bar on the rear face. Emissive but restrained: the G-buffer
       // boosts lens edges by 1.55x, so the base value has to stay low or the
       // bloom turns the whole rear of the car into a white blob.
@@ -238,7 +302,7 @@ class App {
     this.renderer.handleResize();
     this.raceTime += dt;
     this.update(dt);
-    this.buildDrawList();
+    this.buildDrawList(dt);
 
     // Chase camera. Anchored BEHIND the car and looking at it, with the look
     // target pushed down the strip so the road ahead stays in frame.
@@ -246,17 +310,17 @@ class App {
     // Broadcast angle: high, well back, and angled down the strip. Low chase
     // cameras put the road surface across the lower third of frame and lose the
     // cars behind trackside furniture.
-    const camX = 0.9;
-    const camY = 4.4;
-    const camZ = v.distance - 12.0;
+    const camX = 0.6;
+    const camY = 3.1;
+    const camZ = v.distance - 13.5;
     this.renderer.cameraPos = [camX, camY, camZ];
     mat4.lookAt(
       this.renderer.view,
       new Float32Array([camX, camY, camZ]),
-      new Float32Array([0, 0.5, v.distance + 18]),
+      new Float32Array([0, 1.15, v.distance + 4]),
       new Float32Array([0, 1, 0]),
     );
-    this.renderer.updateMatrices((42 * Math.PI) / 180, 0.3, 900);
+    this.renderer.updateMatrices((36 * Math.PI) / 180, 0.3, 900);
 
     this.renderer.render(this.items, dt * 1000, now);
     this.frameCount++;

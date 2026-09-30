@@ -48,11 +48,13 @@ export function buildStrip(): StripMeshData {
 
   return {
     // The racing surface: dark, low roughness, so it reflects the trees.
-    ground: buildGround(width, depth, 64),
+    // 40m behind the line so the chase camera always has surface under it.
+    ground: buildGround(width, depth + 40, 72, -40),
     // Painted lane markings, very slightly proud of the surface.
     lanes: buildLaneMarkings(),
     // The staging beam the player stages against.
     stagingBeam: buildQuad(0, 0.001, 0.1, width - 1.0, 0.22),
+    // Extra apron light so the launch area behind the line is not a void.
     // Side walls keep the light pools from leaking.
     walls: buildWalls(width, depth),
     lightTowers: buildLightTowers(),
@@ -82,13 +84,14 @@ function buildLaneMarkings(): MeshData {
     indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
   };
 
-  // Centre divider, dashed.
-  for (let z = START_Z; z < FINISH_Z; z += 8) {
+  // Centre divider, dashed. Runs behind the start line so the camera has
+  // markings under it during the launch.
+  for (let z = -40; z < FINISH_Z; z += 8) {
     pushQuad(-0.09, z, 0.09, z + 4.2);
   }
   // Lane edges.
-  pushQuad(-STRIP_HALF_WIDTH, START_Z, -STRIP_HALF_WIDTH + 0.12, FINISH_Z);
-  pushQuad(STRIP_HALF_WIDTH - 0.12, START_Z, STRIP_HALF_WIDTH, FINISH_Z);
+  pushQuad(-STRIP_HALF_WIDTH, -40, -STRIP_HALF_WIDTH + 0.12, FINISH_Z);
+  pushQuad(STRIP_HALF_WIDTH - 0.12, -40, STRIP_HALF_WIDTH, FINISH_Z);
   // Distance markers every 60ft-ish for readability of speed.
   for (let ft = 60; ft <= 1320; ft += 60) {
     const z = ft * 0.3048;
@@ -120,8 +123,8 @@ function buildWalls(width: number, depth: number): MeshData {
   const side = (x: number, nx: number) => {
     const base = positions.length / 3;
     positions.push(
-      x, 0, START_Z - 10,
-      x, h, START_Z - 10,
+      x, 0, -46,
+      x, h, -46,
       x, h, depth,
       x, 0, depth,
     );
@@ -196,8 +199,8 @@ function buildStands(depth: number): MeshData {
 function buildBarriers(width: number, depth: number): MeshData {
   const parts: MeshData[] = [];
   for (const side of [-1, 1]) {
-    const rail = buildBox(0.1, 0.34, depth);
-    parts.push(translate(rail, side * (STRIP_HALF_WIDTH + 1.1), 0.34, depth / 2));
+    const rail = buildBox(0.1, 0.34, depth + 46);
+    parts.push(translate(rail, side * (STRIP_HALF_WIDTH + 1.1), 0.34, (depth + 46) / 2 - 46));
   }
   void width;
   return mergeGeometries(parts);

@@ -379,12 +379,23 @@ export function buildBox(w: number, h: number, d: number): MeshData {
  * SSR raymarch both have geometry to work with; the shader adds the surface
  * detail, so this stays coarse.
  */
-export function buildGround(w: number, d: number, subdivisions: number): MeshData {
+/**
+ * A subdivided plane in the XZ plane. `zStart` extends the surface BACKWARD
+ * from z=0, which the drag strip needs: the chase camera trails the car by
+ * ~13m, so a ground plane beginning at the start line leaves the camera hanging
+ * off its end for the whole launch.
+ */
+export function buildGround(
+  w: number,
+  d: number,
+  subdivisions: number,
+  zStart = 0,
+): MeshData {
   const mb = new MeshBuilder();
   const rows: number[][] = [];
   for (let j = 0; j <= subdivisions; j++) {
     const row: number[] = [];
-    const z = (j / subdivisions) * d;
+    const z = zStart + (j / subdivisions) * d;
     for (let i = 0; i <= subdivisions; i++) {
       const x = (i / subdivisions) * w - w / 2;
       row.push(mb.vertex(x, 0, z, i / subdivisions, j / subdivisions));
