@@ -330,3 +330,92 @@ export function buildWheel(
   mb.computeNormals();
   return mb;
 }
+
+/**
+ * An axis-aligned box centred on the origin. Used for track furniture, where
+ * exact silhouettes matter less than the triangle count staying trivial.
+ */
+export function buildBox(w: number, h: number, d: number): MeshData {
+  const hw = w / 2;
+  const hh = h / 2;
+  const hd = d / 2;
+  const positions = new Float32Array([
+    // +X
+    hw, -hh, hd, hw, -hh, -hd, hw, hh, -hd, hw, hh, hd,
+    // -X
+    -hw, -hh, -hd, -hw, -hh, hd, -hw, hh, hd, -hw, hh, -hd,
+    // +Y
+    -hw, hh, hd, hw, hh, hd, hw, hh, -hd, -hw, hh, -hd,
+    // -Y
+    -hw, -hh, -hd, hw, -hh, -hd, hw, -hh, hd, -hw, -hh, hd,
+    // +Z
+    -hw, -hh, hd, hw, -hh, hd, hw, hh, hd, -hw, hh, hd,
+    // -Z
+    hw, -hh, -hd, -hw, -hh, -hd, -hw, hh, -hd, hw, hh, -hd,
+  ]);
+  const normals = new Float32Array([
+    1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+    -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+    0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+    0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
+    0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+    0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1,
+  ]);
+  const uvs = new Float32Array(24);
+  for (let i = 0; i < 8; i++) {
+    uvs[i * 2] = i % 2;
+    uvs[i * 2 + 1] = (i >> 1) % 2;
+  }
+  const indices = new Uint32Array(36);
+  for (let f = 0; f < 6; f++) {
+    const b = f * 4;
+    indices.set([b, b + 1, b + 2, b, b + 2, b + 3], f * 6);
+  }
+  return { positions, normals, uvs, indices };
+}
+
+/**
+ * The racing surface. A subdivided plane so that per-vertex lighting and the
+ * SSR raymarch both have geometry to work with; the shader adds the surface
+ * detail, so this stays coarse.
+ */
+export function buildGround(w: number, d: number, subdivisions: number): MeshData {
+  const mb = new MeshBuilder();
+  const rows: number[][] = [];
+  for (let j = 0; j <= subdivisions; j++) {
+    const row: number[] = [];
+    const z = (j / subdivisions) * d;
+    for (let i = 0; i <= subdivisions; i++) {
+      const x = (i / subdivisions) * w - w / 2;
+      row.push(mb.vertex(x, 0, z, i / subdivisions, j / subdivisions));
+    }
+    rows.push(row);
+  }
+  for (let j = 0; j < subdivisions; j++) {
+    for (let i = 0; i < subdivisions; i++) {
+      const a = rows[j][i];
+      const b = rows[j][i + 1];
+      const c = rows[j + 1][i + 1];
+      const d2 = rows[j + 1][i];
+      mb.tri(a, d2, c);
+      mb.tri(a, c, b);
+    }
+  }
+  return mb.build();
+}
+
+/** A flat quad in the XZ plane, centred on x/z at height y. */
+export function buildQuad(x: number, y: number, z: number, w: number, d: number): MeshData {
+  const hw = w / 2;
+  const hd = d / 2;
+  const positions = new Float32Array([
+    x - hw, y, z - hd,
+    x + hw, y, z - hd,
+    x + hw, y, z + hd,
+    x - hw, y, z + hd,
+  ]);
+  const normals = new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]);
+  const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+  const indices = new Uint32Array([0, 2, 1, 0, 3, 2]);
+  return { positions, normals, uvs, indices };
+}

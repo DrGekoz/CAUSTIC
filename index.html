@@ -10,8 +10,20 @@
 </head>
 <body>
   <div id="app">
-    <canvas id="gl" aria-label="Race view"></canvas>
-    <div id="ui"></div>
+    <canvas id="view" aria-label="Race view"></canvas>
+    <div id="hud">
+      <div class="panel" id="err"></div>
+      <div class="panel" id="stage">CAUSTIC</div>
+      <div class="panel" id="rpm">
+        <span id="rpmv">0</span> rpm
+        <div id="bar"><div id="fill"></div></div>
+      </div>
+      <div class="panel" id="speed">
+        <div class="val" id="speedv">0</div>
+        <div class="unit">KM/H</div>
+      </div>
+      <div class="panel" id="diag">—</div>
+    </div>
   </div>
   <noscript>CAUSTIC requires JavaScript and a WebGL2-capable browser.</noscript>
   <script type="module" src="/src/main.ts"></script>

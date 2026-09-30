@@ -1,0 +1,123 @@
+:root {
+  color-scheme: dark;
+  --hud-bg: rgba(8, 11, 17, 0.62);
+  --hud-border: rgba(150, 180, 220, 0.16);
+  --hud-fg: #e8eef7;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #05070b;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--hud-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app { position: fixed; inset: 0; }
+
+#view {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  touch-action: none;
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  position: absolute;
+  padding: 10px 14px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+#speed {
+  left: 50%;
+  bottom: 4vh;
+  transform: translateX(-50%);
+  text-align: center;
+  min-width: 260px;
+}
+
+#speed .val {
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+#speed .unit {
+  font-size: 13px;
+  opacity: 0.6;
+  letter-spacing: 0.14em;
+}
+
+#rpm {
+  left: 50%;
+  bottom: calc(4vh + 96px);
+  transform: translateX(-50%);
+  width: 460px;
+  max-width: 88vw;
+  font-size: 13px;
+}
+
+#bar {
+  height: 10px;
+  margin-top: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+#fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #2ecc71, #f1c40f 62%, #e74c3c 88%);
+}
+
+#diag {
+  right: 12px;
+  top: 12px;
+  font-size: 11px;
+  opacity: 0.75;
+  text-align: right;
+}
+
+#stage {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  opacity: 0.9;
+}
+
+#err {
+  left: 12px;
+  top: 12px;
+  max-width: 60ch;
+  color: #ffb4b4;
+  font-size: 12px;
+  display: none;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  #speed .val { font-size: 34px; }
+  #rpm { bottom: calc(4vh + 78px); }
+}

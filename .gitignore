@@ -4,3 +4,4 @@ dist/
 *.local
 .vite/
 tests/_probe.test.ts
+tests/_diag.ts
