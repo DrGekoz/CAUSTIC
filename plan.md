@@ -5,7 +5,14 @@
 > thesis: we are not shipping ray tracing, we are shipping what makes ray-traced
 > footage *look* like ray tracing, at a cost a potato can pay.
 
-Status: **PLAN ONLY — no game code written yet.**
+Status: **v0.3.0 — engine and game logic built, not yet playable.**
+
+Built: physics (engine, tyres, drivetrain, 240Hz), procedural car geometry,
+hand-written WebGL2 deferred renderer, launch mechanic, tuning branch tree,
+rivals, economy. 95 tests green, typecheck clean.
+
+Not built: race loop, input handling, garage/shop UI, save system, audio.
+The demo autopilot drives two cars down a lit strip; the player cannot.
 Version: 1.1 · Author: DrGekoz · Repo: `DrGekoz/CAUSTIC`
 
 ---
@@ -894,3 +901,41 @@ Free, local, source-only, MIT.
 
 **MIT.** All original code. Third-party assets limited to CC0 Kenney Car Kit with
 attribution in `CREDITS.md`. No paid API, token, or component tier anywhere in the stack.
+
+---
+
+## 12. Build progress
+
+Phases 0–7 complete, 8–10 not started. Recorded here rather than in the README so
+the README stays a pitch.
+
+| Phase | Deliverable | State |
+|---|---|---|
+| 0 | Scaffolding, Vite, tests | done |
+| 1 | Physics: torque, tyres, drivetrain | done — 6 bugs fixed, all documented in source |
+| 2 | Procedural car geometry, 12-car roster | done — 2,324 tris/car, 0.39MB roster |
+| 3 | WebGL2 context, programs, targets | done |
+| 4 | Deferred graph: G-buffer, GTAO, lighting, SSR, volumetrics, TAA, bloom, ACES | done — 4 bugs found only by running it |
+| 5 | Scene: strip, lighting rig, camera, brake lights | done, mid-iteration on art direction |
+| 6 | Launch Window, tuning tree, rivals, economy | done — 34 tests |
+| 7 | 4 quality tiers, dynamic resolution | done |
+| 8 | Race loop, ET scoring, opponent AI | **not started** |
+| 9 | Garage, shop, save, input, audio | **not started** |
+| 10 | Polish, mobile, packaging | **not started** |
+
+### The recurring lesson
+
+Every significant bug in this project was invisible to typecheck and to unit
+tests. They were found by running the thing and looking at it:
+
+- The geometry pass was silently discarded every frame by a feedback loop.
+- Normal matrices were garbage because a mat3 went through a mat4 setter.
+- The wheels were generated and never uploaded, so the cars had no wheels.
+- A near-bog launch paid *more* than a good one, because a grade band was
+  unreachable and fell through to a better one.
+- A tuning part was unfittable in every legal build, because `requires` is a
+  conjunction and its two alternatives are mutually exclusive.
+
+The render test now scrapes the console for `INVALID_` and feedback-loop
+messages, and the screenshot loop exists because a scene that renders without
+errors can still be completely wrong.
