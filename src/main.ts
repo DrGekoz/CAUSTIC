@@ -9,10 +9,13 @@ import { mat4, mat3 } from 'gl-matrix';
 import { Renderer, DEFAULT_FRAME, type DrawItem, type QualityTier } from './render/Renderer';
 import { NIGHT_GRADE } from './world/NightGrade';
 import { GPUMesh } from './render/GL';
-import { buildCar, toVehicleConfig, type CarMesh, type CarSpec } from './geometry/Car';
-import { CARS } from './game/data/cars';
+import { buildCar, type CarMesh, type CarSpec } from './geometry/Car';
 import { buildStrip, buildLights, uploadStrip, buildLampBar, LANE_CENTRE } from './world/Strip';
-import { Vehicle, NO_INPUT, type VehicleInputs } from './physics/Vehicle';
+import { Race, type RaceInput } from './game/Race';
+import { CAR_BY_ID } from './game/data/cars';
+import { RIVALS, type BranchId } from './game/Economy';
+import { InputManager, TouchControls } from './ui/Input';
+import { LaunchHud } from './ui/LaunchHud';
 
 declare global {
   interface Window {
@@ -31,7 +34,28 @@ const FIXED_DT = 1 / 240;
 
 class App {
   renderer!: Renderer;
-  vehicles: Vehicle[] = [];
+  /**
+   * The Race owns both vehicles and their clocks. The app drives it and reads
+   * back a snapshot; it never steps a vehicle itself.
+   */
+  race: Race | null = null;
+  /** Convenience handles onto the two lanes, for rendering. */
+  vehicles: import('./physics/Vehicle').Vehicle[] = [];
+  input = new InputManager();
+  touch: TouchControls | null = null;
+  hud: LaunchHud | null = null;
+  /** True once the player has actually driven; before that the autopilot runs. */
+  humanDriving = false;
+  /** Tuning fitted, by car id. */
+  tuning = new Map<string, BranchId[]>();
+  activeCarId = 'rusty8';
+  rivalCarId = 'hatch';
+  /** Index into RIVAL_DRIVES. */
+  rivalSkill = 0;
+  /** Launch rpm the autopilot stages to. */
+  demoLaunchRpm = 3900;
+  /** Display name of the current rival, for the result panel. */
+  rivalName = 'RIVAL';
   built: CarMesh[] = [];
   specs: CarSpec[] = [];
   gpu: Record<string, GPUMesh> = {};
@@ -93,9 +117,23 @@ class App {
     const gl = this.renderer.ctx.gl;
     this.gpu = uploadStrip(gl, buildStrip());
 
-    // Two cars in the two lanes, 6 metres apart: player right, rival left.
-    const player = CARS[0];
-    const rival = CARS[1];
+    // Two cars in two lanes: the player in the right lane, the rival left.
+    // The Race OWNS both vehicles and their timing, so the app never steps a
+    // vehicle itself -- that would advance the physics without the race clock
+    // and the ET would disagree with what is on screen.
+    const player = CAR_BY_ID[this.activeCarId];
+    const rival = CAR_BY_ID[this.rivalCarId];
+    this.race = new Race(
+      player,
+      new Set(this.tuning.get(player.id) ?? []),
+      rival,
+      new Set<BranchId>(),
+      this.rivalSkill,
+    );
+    this.race.begin();
+    this.vehicles = [this.race.player.vehicle, this.race.rival.vehicle];
+    this.rivalName = RIVALS[this.rivalSkill]?.name ?? 'RIVAL';
+
     for (const [i, spec] of [player, rival].entries()) {
       const built = buildCar(spec);
       this.built.push(built);
@@ -115,7 +153,6 @@ class App {
         );
       }
       this.wheelOffsets.push(built.wheelOffsets.map((o) => [o[0], o[1], o[2]] as [number, number, number]));
-      this.vehicles.push(new Vehicle(toVehicleConfig(spec)));
       this.modelMats.push(new Float32Array(16));
       this.normalMats.push(new Float32Array(9));
       this.lampMats.push(new Float32Array(16));
@@ -125,19 +162,62 @@ class App {
         this.wheelNorms.push(new Float32Array(9));
       }
     }
-    for (const v of this.vehicles) v.reset(1);
   }
 
-  /** Advance the fixed-step simulation and rebuild the draw list. */
+  /**
+   * Advance the fixed-step simulation.
+   *
+   * The Race owns the vehicles and their clocks, so the app only feeds it
+   * input. Stepping a vehicle directly would advance the physics without the
+   * race clock, and the ET would disagree with what is on screen.
+   */
   update(dtReal: number): void {
+    if (!this.race) return;
     this.accumulator += Math.min(dtReal, 0.25);
     let steps = 0;
+    const raceInput = this.sampleInput();
     while (this.accumulator >= FIXED_DT && steps < 12) {
-      for (const v of this.vehicles) v.step(FIXED_DT, this.demoInput(v));
+      this.race.step(FIXED_DT, raceInput);
       this.accumulator -= FIXED_DT;
       steps++;
     }
     if (steps >= 12) this.accumulator = 0;
+    this.input.endFrame();
+  }
+
+  /**
+   * Player input, or the demo autopilot when nobody is driving. The autopilot
+   * stages to a chosen rpm, dumps the clutch and shifts at the redline, which
+   * is exactly what a player does -- so it exercises the whole drivetrain.
+   */
+  private sampleInput(): RaceInput {
+    const kbd = this.input.sample(FIXED_DT);
+    if (this.touch && this.touch.visible) {
+      const t = this.touch.sample();
+      kbd.throttle = Math.max(kbd.throttle, t.throttle);
+      kbd.brake = Math.max(kbd.brake, t.brake);
+      kbd.clutch = kbd.clutch && t.clutch;
+      kbd.launch = kbd.launch || t.launch;
+    }
+    if (this.humanDriving) return kbd;
+
+    const race = this.race;
+    if (!race) return kbd;
+    const v = race.player.vehicle;
+    if (race.phase === 'STAGING') {
+      const err = this.demoLaunchRpm - v.rpm;
+      return {
+        ...kbd,
+        throttle: err > 0 ? Math.min(1, err / 600) : 0,
+        clutch: true,
+        launch: race.stageTime > 0.9,
+      };
+    }
+    return {
+      ...kbd,
+      throttle: 1,
+      shiftUp: v.rpm > v.cfg.curve.redline * 0.96 && v.shiftReady,
+    };
   }
 
   /**
@@ -145,21 +225,6 @@ class App {
    * clutch to a launch rpm, dumps it, and then shifts at the redline -- which is
    * exactly what a player does, and it exercises every part of the drivetrain.
    */
-  private demoInput(v: Vehicle): VehicleInputs {
-    // Stage: hold the clutch and build revs toward the launch band.
-    if (this.raceTime < 0.7) {
-      return {
-        ...NO_INPUT,
-        throttle: Math.min(1, this.raceTime / 0.5),
-        clutch: true,
-      };
-    }
-    // Then dump the clutch and stay on the throttle, shifting at the redline.
-    if (v.rpm > v.cfg.curve.redline * 0.95 && v.shiftReady) {
-      return { ...NO_INPUT, throttle: 1, shiftUp: true };
-    }
-    return { ...NO_INPUT, throttle: 1 };
-  }
 
   buildDrawList(dtReal: number): void {
     const items = this.items;
@@ -295,12 +360,19 @@ class App {
     }
   }
 
+  /** Put both cars back on the line for another run. */
+  restart(): void {
+    this.race?.begin();
+    this.raceTime = 0;
+  }
+
   frame(now: number): void {
     const dt = this.lastNow === 0 ? FIXED_DT : (now - this.lastNow) / 1000;
     this.lastNow = now;
 
     this.renderer.handleResize();
     this.raceTime += dt;
+    if (this.input.pressed('restart')) this.restart();
     this.update(dt);
     this.buildDrawList(dt);
 
@@ -323,6 +395,9 @@ class App {
     this.renderer.updateMatrices((36 * Math.PI) / 180, 0.3, 900);
 
     this.renderer.render(this.items, dt * 1000, now);
+    if (this.hud && this.race) {
+      this.hud.draw(this.race.snapshot(), now, this.rivalName);
+    }
     this.frameCount++;
     this.serviceReadback();
   }
@@ -385,6 +460,10 @@ if (typeof document !== 'undefined') {
       const app = boot();
       (window as unknown as Record<string, unknown>).__CAUSTIC_APP__ = app;
       startHud(app);
+      const root = document.getElementById('hud')?.parentElement ?? document.body;
+      app.hud = new LaunchHud(root);
+      app.touch = new TouchControls(root);
+      app.touch.visible = 'ontouchstart' in window;
     } catch (e) {
       const box = document.getElementById('err');
       if (box) {

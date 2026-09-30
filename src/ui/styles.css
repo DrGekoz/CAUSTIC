@@ -126,3 +126,68 @@ body {
    console or by the screenshot harness, so a capture is the game and nothing
    else. */
 body.present #hud { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Launch window. The mechanic is invisible without it: the player has to see
+   the band, the needle inside it, and the grade that came out.
+   --------------------------------------------------------------------------- */
+
+.launchhud {
+  position: absolute;
+  left: 50%;
+  bottom: 14vh;
+  transform: translateX(-50%);
+  width: min(560px, 88vw);
+  height: 150px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ---------------------------------------------------------------------------
+   Touch controls, shown only on a touch device.
+   --------------------------------------------------------------------------- */
+
+.touch {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 34vh;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.tbtn {
+  position: absolute;
+  pointer-events: auto;
+  border: 1px solid rgba(150, 180, 220, 0.22);
+  background: rgba(10, 14, 20, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #e8eef7;
+  border-radius: 12px;
+  font: 600 13px/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  display: grid;
+  place-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+.tbtn.active {
+  background: rgba(46, 204, 113, 0.28);
+  border-color: rgba(46, 204, 113, 0.5);
+}
+
+.tleft   { left: 4vw;  bottom: 3vh; width: 74px; height: 74px; }
+.tright  { left: 20vw; bottom: 3vh; width: 74px; height: 74px; }
+.tclutch { left: 50%; transform: translateX(-50%); bottom: 3vh; width: 92px; height: 74px; }
+.tbrake  { right: 20vw; bottom: 3vh; width: 84px; height: 74px; }
+.tgas    { right: 4vw;  bottom: 3vh; width: 92px; height: 92px; }
+
+/* Keep the HUD out of the way of the touch pads. */
+@media (pointer: coarse) {
+  .launchhud { bottom: 38vh; }
+  #speed { bottom: 36vh; }
+  #rpm { display: none; }
+}
