@@ -20,9 +20,11 @@ seconds. Stage the engine into the green rev band, hit the perfect-shift gold zo
 launch quality becomes a physical multiplier on rear-tyre grip and engine torque. A good car
 with a bad launch loses to a cheap car with a good launch.
 
-Around it: a deep **infinite** tuning ladder (9 categories, exponential cost, linear effect,
-no cap), 12 procedurally generated cars across 6 tiers, a 24-rival career ladder in 4 bands,
-a 30-node skill tree, and prestige.
+Around it: a **branch-tree** tuning system (~34 mutually-exclusive parts across 6 branches,
+so buying turbo permanently closes off the naturally-aspirated path), 6 item **sets** that
+reward coherent builds, 12 procedurally generated cars across 6 tiers, a fixed 24-rival
+career ladder in 4 bands, a 30-node skill tree, and prestige. One faucet for power (race
+payouts) and one for options (credits) — deliberately no crates, wheels or dailies.
 
 ## Why it looks like this
 
@@ -64,7 +66,8 @@ actual torque curve, through a procedurally-generated convolution reverb — it 
 tune, because the harmonics come from the model. The whole audio layer is a few KB of
 code.
 
-The only third-party assets are Kenney's Car Kit (CC0), used for low-tier fallback models.
+The only third-party assets are Kenney's Car Kit (CC0) and a BMW M4 (CC BY 4.0), used for
+low-tier fallback models. Licence floor: any third-party 3D model must be CC0 or CC BY.
 
 ## Controls
 

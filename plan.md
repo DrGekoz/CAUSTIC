@@ -6,7 +6,7 @@
 > footage *look* like ray tracing, at a cost a potato can pay.
 
 Status: **PLAN ONLY — no game code written yet.**
-Version: 1.0 · Author: DrGekoz · Repo: `DrGekoz/CAUSTIC`
+Version: 1.1 · Author: DrGekoz · Repo: `DrGekoz/CAUSTIC`
 
 ---
 
@@ -60,6 +60,7 @@ not from descriptions.
 | 5 | `elisha-39/Ultra-Drag-Racing-Full-Version` | ❌ | **Fake shell.** Identical pattern to #1. | **Nothing.** |
 | 6 | `everalon-20/Ultra-Drag-Racing` | ❌ | **Fake shell.** Identical pattern to #1. | **Nothing.** |
 | 7 | `DevSwist06/togai` | ✅ | Top-down WebGPU racing, WASM physics, hand-written software mesh renderer, full test suite. | **Track spline format, software-mesh fallback idea, discipline (§11.4).** |
+| `TeggTTV/drag-racing` | **Branch-tree tuning structure, set-bonus pattern, resale/depreciation formula, rival-ladder shape. Zero assets (§11.2).** |
 | 8 | `bait-3071taxied/CLUTCH-Early-Prototype-2026` | ❌ | **Fake shell.** 3 files, `activity.log` committed every 20 min by Actions. | **Nothing.** |
 | 9 | `updraft63-enemata/STUNTBOOST-PC` | ❌ | **Fake shell.** Same. | **Nothing.** |
 | 10 | `capacityknights88/Lead-The-Dragon-Devlog-2026` | ❌ | **Fake shell.** Same. | **Nothing.** |
@@ -405,124 +406,215 @@ retry is a race loop people stop playing.
 
 ## 7. Meta-game systems
 
+> **v1.1 revision.** §7 was rewritten after reading the actual source of `TeggTTV/drag-racing`
+> (the deepest meta-game in the reference set) rather than designing it in the abstract. Three
+> substantive changes: **(a)** the tuning ladder is no longer a flat infinite numeric grind —
+> it is a *mutually-exclusive branch tree* with real build identity; **(b)** item **sets** are
+> added as a second, orthogonal build axis; **(c)** the level curve and rival ladder are
+> re-derived from measured reference values. Concrete reference numbers are quoted throughout
+> and the *weaknesses* found in the reference are explicitly designed against.
+
+### 7.0 What the reference does right — and what is wrong with it
+
+Reading `TeggTTV/drag-racing`'s economy surfaced one genuinely excellent idea and several
+clear traps. Both are recorded here so the build inherits the good parts and avoids the rest.
+
+**The good idea — mutually-exclusive build branches.** Its `MOD_TREE` is not a list of
+upgrades; it is a DAG where buying `turbo_kit` (`conflictsWith: ['na_cams','supercharger']`)
+permanently locks out two other paths. `muffler_sport` / `muffler_race` / `muffler_straight`
+are three mutually exclusive options at three price points. This is *much* better than a flat
+"Engine +1.6% per level" ladder, because the player expresses an opinion rather than
+grinding a number. **CAUSTIC adopts this as its primary tuning system** (§7.4).
+
+**Trap 1 — the flat ladder alternative.** A pure `cost = base·growth^L`, `effect = 1+p·L`
+ladder is what my v1.0 proposed. It is legible, it never breaks, and it is *boring*: after
+level 30 the player is buying a diminishing number forever with no decision to make. Replaced.
+
+**Trap 2 — six parallel faucets.** The reference has XP, Money, rarity-tiered items, crates,
+a spin wheel, a 30-day reward ladder, junkyard, dealership, and an auction house, all paying
+into the same economy. The result is that cash income and item income are both inflated by
+whichever faucet a player happens to use, and progression speed decouples from skill.
+**CAUSTIC deliberately runs a single faucet for power (race payouts) plus one soft faucet
+for options (credits).** Crates, wheels, dailies and auctions are *excluded* from v1 —
+they are the classic way an incremental game becomes a slot machine with a driving game
+bolted on. See §15.
+
+**Trap 3 — gacha economics.** Crates at $500/$2k/$5k/$20k with drop rates down to
+`LEGENDARY: 0.2` and a `$10,000` jackpot on a spin wheel paying 1.5% are a monetisation
+shape, not a game-design shape. Explicitly rejected.
+
+**Trap 4 — opponent rubber-banding.** The reference's `OpponentGenerator` scales
+`difficultyMultiplier = 0.8 + level * 0.05` with ±10% variance and an `isBoss` 1.3×
+multiplier, generating rivals from the *player's* level. So a player who over-invests in one
+car makes every rival easier. **CAUSTIC's rivals are on a fixed, authored ladder keyed to
+progress gates, never to the player's current power** — so a stronger car is always spent
+against a stronger rival.
+
 ### 7.1 Currencies
 
-| Currency | Earned from | Spent on | Purpose |
-|---|---|---|---|
-| **Cash** `$` | Race payouts (the only real faucet) | Cars, tuning, junkyard parts | The progression spine |
-| **Credits** `C` | First-time rival defeats, milestones, achievements | Skill tree nodes | Gates *knowledge*, not power |
-| **Rebuild Tokens** | Prestige | Permanent perks post-reset | The long tail |
+Two, both earned from racing. Nothing else grants power.
 
-Two currencies is the maximum that stays legible. Credits deliberately cannot buy power —
-they buy *options*, which stops the second currency from being a shop button.
+| Currency | Earned | Spent on | Purpose |
+|---|---|---|---|
+| **Cash** `$` | Race payouts — the only power faucet | Branch-tree parts, cars, dyno, crew | The progression spine |
+| **Credits** `C` | First-time rival defeats, career milestones, achievements | Skill tree nodes | Gates *options*, never power |
+
+Deliberately no XP-and-level track. The reference's `calculateNextLevelXp = 100 · level²`
+means level 20 costs 40,000 XP to reach and a level is a number that grants nothing except
+access to a number. **CAUSTIC replaces levels with the rival ladder** — progress is measured
+in *rivals beaten and builds owned*, which is legible and self-explanatory.
+
+Credits cannot buy torque, grip, or cash multipliers. They buy things like a wider shift
+window, a second loadout, or a practice mode. This is the single most important economy
+decision in the document: it means a player who buys everything with cash is never *behind*,
+they are just playing a harder version.
 
 ### 7.2 Race payout — concrete formula
 
 ```
 marginMult = clamp(1 + (playerET − rivalET) / rivalET · 3.0, 0.35, 2.50)
-launchMult = 0.80 + launchQuality · 0.0045                 // 0.80 … 1.25
+launchMult = 0.80 + launchQuality · 0.0045                    // 0.80 … 1.25
 payout     = rival.basePayout × marginMult × launchMult
 credits    = 1 on first defeat of each rival, else 0
 ```
 
-Worst case (bogged launch, blown it) = 35% of base. Best case (perfect launch, huge margin) =
-2.5 × 1.25 = **3.125×** base. That's a 9:1 spread on the same opponent, which means the
-Launch Window is worth more than any single upgrade for the first hour of play. Deliberate.
+Worst case (bogged launch, blown it) = 0.35 × 0.80 = **0.28×** base.
+Best case (perfect launch, large margin) = 2.50 × 1.25 = **3.125×** base.
+An **11:1** spread on the identical opponent. The Launch Window is worth more than any single
+upgrade for the first hour, which is the correct order of operations for a game that wants
+skill to be felt before grind is felt.
 
-### 7.3 Rival ladder — 24 rivals, 4 bands
+Distance payout weighting: 1/8 mile 40%, 1/4 mile 35%, 1,320 ft 25% — so a car that is fast
+off the line but falls off at the top end cannot max a payout.
 
-| Band | Rivals | Names | Base payout | Gate |
-|---|---|---|---|---|
-| **STREET** | 1–6 | The Strip, Ninth Street, Greyline, Rust Belt, Backlot, Half-Mile Harry | $800 → $4,000 | Buy the band-1 car |
-| **REGIONAL** | 7–12 | Coasts, Hill Country, Riverbend, Ironworks, Saltflat, Long Haul | $5,000 → $22,000 | Any STREET rival + car tier 2 |
-| **NATIONAL** | 13–18 | The Committee, Redline, Apex, Torque Co., Dyno Row, Blackout | $30,000 → $140,000 | Any REGIONAL rival + car tier 3 |
-| **LEGEND** | 19–24 | Kaido, The Ghost, 10-Second Dan, Absolut, The Auditor, Immortal | $200,000 → $1,200,000 | Any NATIONAL rival + car tier 4 |
+### 7.3 Rival ladder — 24 rivals, 4 bands, fixed not generated
 
-Each rival has a named car, a distinct AI launch profile (rev target, shift jitter, reaction
-time), and a one-line taunt. Rivals get progressively *better launchers*, not just faster
-cars — so a skill ceiling always exists ahead of the money ceiling.
+**Authored, not procedurally generated** (see Trap 4, §7.0). Each rival is a hand-authored
+build spec — a real branch-tree configuration plus a real car — with an authored AI launch
+profile.
 
-### 7.4 Tuning ladder — 9 categories, INFINITE levels
+| Band | Rivals | Base payout | Gate |
+|---|---|---|---|
+| **STREET** | 1–6 · The Strip, Ninth Street, Greyline, Rust Belt, Backlot, Half-Mile Harry | $800 → $4,000 | Buy the tier-1 car |
+| **REGIONAL** | 7–12 · Coasts, Hill Country, Riverbend, Ironworks, Saltflat, Long Haul | $5,000 → $22,000 | Any STREET rival + car tier 2 |
+| **NATIONAL** | 13–18 · The Committee, Redline, Apex, Torque Co., Dyno Row, Blackout | $30,000 → $140,000 | Any REGIONAL rival + car tier 3 |
+| **LEGEND** | 19–24 · Kaido, The Ghost, 10-Second Dan, Absolut, The Auditor, Immortal | $200,000 → $1,200,000 | Any NATIONAL rival + car tier 4 |
 
-No `maxLevel`. No `maxEffect`. Cost grows exponentially, effect grows linearly. The cost curve
-is the entire gating mechanism, and a reduction category asymptotes so it can never be
-degenerate.
+A rival's difficulty is expressed the way a real car person would express it — as a build:
+"The Committee runs a big single-turbo, 2.90 gears, 240mph tyres, and it launches at 0.92
+quality." Rivals get *better launchers* as well as more power, so a skill ceiling always
+exists above the money ceiling.
 
-| Category | Base cost | Growth | Effect / level | Target stat |
-|---|---|---|---|---|
-| Engine | $450 | 1.145 | +1.6% peak torque | `peakTorque` |
-| Turbo | $1,200 | 1.160 | +1.1% boost pressure | `torqueCurve.h` (plateau) |
-| Nitrous | $3,000 | 1.190 | +0.9% (soft-caps at 40) | `nitrousOutput` |
-| Tires | $600 | 1.135 | +1.3% grip coefficient | `tireMu` |
-| Transmission | $800 | 1.140 | +1.0% shift speed | `shiftWindowMs` |
-| Chassis | $1,500 | 1.155 | +1.1% stiffness | `weightTransferRate` |
-| Weight | $2,500 | 1.170 | mass `× (1 − 0.4·(1 − 0.985^L))` → asymptote 0.60× | `mass` |
-| Cooling | $900 | 1.145 | +1.2% sustained torque | `heatRate` |
-| Brakes | $400 | 1.140 | +1.5% brake force | `brakeTorque` |
+### 7.4 Tuning — the branch tree (REPLACES the v1.0 numeric ladder)
+
+Parts form a **directed acyclic graph with mutual exclusions**. You buy a *build*, and the
+exclusions are the interesting part.
 
 ```
-cost(L)   = round(base · growth^L)          // L = current level
-effect(L) = 1 + perLevel · L                // linear, never capped
+                        ┌── [Sport ECU] $450 ──┬── [Cold Air] $800 ──┬── TURBO ────┬── [Big Single] $9,000 ──┬── [Anti-Lag] $6,000
+                        │   +20Nm, redline      │   +15Nm              │  $2,600     │  +180Nm, laggy         │  revs hold with boost
+                        │   6800                │                      │  conflicts: │                       │
+                        │                       │                      │   NA/Super  │  ┌── [Wastegate] $3,000
+                        │                       │                      │            │  └── [BB Turbo] $4,200
+                        │                       │                      │            │
+                        │                       │                      │            └── [Twin-Screw] $7,500
+                        │                       │                      │
+                        │                       │                      └── SUPERCHARGER $3,000 (no lag, less top end)
+                        │                       │
+                        │                       └── NATURAL $3,000 (redline 8500, needs revs, +45Nm)
+                        │                            conflicts: TURBO / SUPER
+                        └── [Stand ECU] $1,800 (cheap, +8Nm, keeps the 6500 line)
 ```
 
-**Worked example — Engine at level 40:** `cost = 450 · 1.145^40 = $138,400`.
-Cumulative spend across levels 0→40 ≈ `$1.05M`. Effect `= 1.64×` peak torque. That gap
-between cost and effect is the *point* — the player is buying a slower and slower margin,
-which is exactly what makes the last twenty levels feel like an achievement.
+Every node declares: `cost`, `parentId`, `conflictsWith[]`, `stats{}` (which may include a
+whole replacement `torqueCurve`), and optionally `tuningOptions[]` — a live tunable range
+(boost pressure 0.8–2.5 bar, final drive 3.0–5.0, tyre pressure 20–40 psi) that changes the
+curve *continuously* between the discrete nodes.
 
-**Weight never breaks:** at level 100 the multiplier is `1 − 0.4·(1 − 0.985^100) = 0.6498`,
-approaching but never crossing 0.60. No degenerate infinite-mass-reduction strategy exists.
+**Why this is strictly better than a ladder:** buying a part is irreversible (you can sell it
+back at 50% — see §7.5), every purchase closes other doors, and the player's build is
+legible to other players in a way "Engine 47" never is. A ~$40k full build is a genuine
+achievement; a level-47 engine slider is not.
 
-### 7.5 Skill tree — 30 nodes, bought with Credits
+**Scope:** ~34 nodes across 6 branches (ENGINE, TURBO, TIRES, TRANSMISSION, WEIGHT, CHASSIS).
+Enough for ~8 distinct viable builds, which is the number at which replayability arrives.
 
-Five branches × 6 nodes. Each changes a *rule*, not a stat.
+### 7.5 Item sets — the second build axis
 
-| Branch | Nodes (abbrev) | Effect class |
+Sets reward *coherent* builds over merely expensive ones, and cost nothing to implement
+because they read the already-installed part list.
+
+| Set | Requires (3 parts) | Bonus |
+|---|---|---|
+| **Drag Specialist** | Drag radials · LSD diff · Lightweight flywheel | +8% torque · +0.15 grip · −0.5 flywheel |
+| **Turbo Master** | Turbo upgrade · Intercooler · Blow-off valve | +25Nm · +0.15 boost · +5% total torque |
+| **Lightweight Racer** | Stripped interior · Bucket seat · Lightweight wheels | −20kg · −0.01 Cd · +3% grip |
+| **N/A Purist** | Cams · Ported head · Intake manifold | +30Nm · +500 redline · +12% credits |
+| **Cooling Pro** | Aluminium rad · Oil cooler · Intercooler | +12Nm · +5% brake force |
+| **Ultimate Power** | Standalone ECU · Forged internals · Fuel injectors · Nitrous · Turbo | +50Nm · +10% torque · +25% credits |
+
+Sets are the reason to run a build you already own rather than buying the single best part
+every time. Six sets, 3–5 parts each, drawn from the same 34-node tree — so a part is often
+a node *and* a set member, which is what makes the tree feel deep without being enormous.
+
+### 7.6 Skill tree — 30 nodes, bought with Credits
+
+Five branches × 6 nodes. Each changes a **rule**, not a stat.
+
+| Branch | Example nodes | Effect class |
 |---|---|---|
 | **LAUNCH** | Green Band +, Anti-Lag, 2-Step, Transbrake, Rollback, Grace Window | Widens the perfect-shift zone, holds revs, permits a staged burnout |
-| **POWER** | Nitrous Duration, Nitrous Recharge, Boost Threshold, Overrun, E85 Blend, Knock Recovery | Nitrous becomes a real resource decision |
-| **GRIP** | Setup Width, Tyre Temp, Line Lock, Weight Bias, Tread Depth, Contact Patch | Widens the traction usable before wheelspin |
-| **BUSINESS** | Sponsor Deal, Pit Crew, Sponsorship Tier, Media Bonus, Data Purchase, Bookings | **Payout multipliers** — the only power-adjacent branch |
-| **REBUILD** | Token Retention, Starting Bonus, Keep 10%, Permanent Grip, Permanent Cash %, 5th Car Slot | Post-prestige power |
+| **GARAGE** | Second Loadout, Practice Mode, Dyno Time, Data Analysis, Sponsor Deal, Crew Chief | **Payout and QoL** — the only power-adjacent branch |
+| **BUILD** | Salvage Rights (+50% part resale), Parts Bin, Trade-In, Discount Card, Bulk Order, Warranty | Makes the branch tree cheaper to experiment with |
+| **CAREER** | Rival Intel (show their build), Longer Bet, Prize Money, Points Per Win, Rivalry, Understudy | Career-lane bonuses |
+| **REBUILD** | Token Retention, Starting Bonus, Keep 15%, Permanent Grip, Permanent Cash %, 5th Car Slot | Post-prestige power |
 
-Total ~3,600 credits ⇒ roughly 25–35 hours to fully own, which is the intended session
-length for a prestige title.
+Roughly 3,600 credits total ⇒ 25–35 hours to fully own. Intended session length for a
+prestige title.
 
-### 7.6 Car roster — 12 cars, 6 tiers
+**Critically:** no node in LAUNCH/BUILD/CAREER buys raw torque or grip. The only way to go
+faster is cash into the tree, or skill into the launch. That is the guard rail from §7.1.
 
-Each car is a distinct *handling character*, not a stat line. All are procedurally generated
-(§8.1) from a parameter block, so 12 cars cost 12 data blocks, not 12 modelling sessions.
+### 7.7 Car roster — 12 cars, 6 tiers
+
+Each car is a distinct *handling character*, not a stat line, and all are procedurally
+generated (§8.1) from a parameter block — so a car is ~40 lines of data, not a modelling
+session.
 
 | Tier | Car | Character |
 |---|---|---|
 | 1 STREET | **Rusty 8** | Free. Sloppy, low grip, torque everywhere. Teaches the game. |
 | 1 STREET | **Hatch** | Forgiving, low power. |
 | 2 MUSCLE | **Ranchero** | Big dumb torque, spins up the rears, wheel-lift. |
-| 2 MUSCLE | **Ninemiler** | Revvy, needs rev range to keep up. |
+| 2 MUSCLE | **Ninemiler** | Revvy — needs rev range to keep up. |
 | 3 JDM | **Skyline Mk4** | High redline, sharp, unforgiving launch. |
 | 3 JDM | **Silvia S15** | Light, drifts the launch, slams gears. |
-| 4 EURO | **RS Turbo** | Balanced, huge tuning headroom. |
+| 4 EURO | **RS Turbo** | Balanced, huge build headroom. |
 | 4 EURO | **G Wagon AMG** | Torque monster, traction-limited. |
-| 5 EXOTIC | **Vettore** | N/A twin-turbo, brutal, expensive. |
-| 5 EXOTIC | **SF-9 Ghib** | AWD, launches off the line unlike anything else. |
+| 5 EXOTIC | **Vettore** | Twin-turbo, brutal, expensive. |
+| 5 EXOTIC | **SF-9 Ghib** | AWD — launches off the line unlike anything else. |
 | 6 HYPER | **Apex One** | Insane power-to-weight, snap oversteer. |
-| 6 HYPER | **Nightlaw** | 1200hp, traction-limited, prestige-tier only |
+| 6 HYPER | **Nightlaw** | 1200hp, traction-limited, prestige-tier only. |
 
-AWD is a *structural* difference (torque split model), not a multiplier, so the Skyline and
-the Vettore feel categorically different in the hands.
+AWD is a **structural** difference (a torque-split model, not a multiplier), so the Ghib
+feels categorically different in the hands rather than numerically better.
 
-### 7.7 Prestige — REBUILD
+Buying a car is a real decision because the branch tree is *not* universal: the big-turbo
+path is wasted on a 1200hp AWD car, and the N/A path is dead on a torque monster. A good car
+is one that supports a build you enjoy.
 
-Reset car, tuning, cars, cash. Keep: skill tree, credits, car unlocks, and 10% of tuning
-levels. Award Rebuild Tokens by a log curve on lifetime earnings. Tokens buy permanent
-perks (1% permanent cash per token, capped at 50%).
+### 7.8 Prestige — REBUILD
+
+Reset cash, parts, cars. Keep: skill tree, credits, car unlocks, and 15% of installed parts
+(their value, refunded as cash). Award Rebuild Tokens on a log curve of lifetime earnings:
 
 ```
 tokens = floor(4 · (lifetimeCash / 1e6) ^ 0.55)
 ```
 
-Each prestige should take ~8–12 hours of first-run time and compress to ~2 hours, which is
-the standard incremental pacing target.
+Tokens buy permanent perks from the REBUILD branch (1% permanent cash per token, capped at
+50%). Each prestige should take ~8–12 hours on a first run and compress to ~2 hours, which
+is the standard incremental pacing target.
 
 ---
 
@@ -550,16 +642,36 @@ Why procedural: zero network cost, zero licensing risk, **and** the geometry den
 tuned per LOD at generation time rather than shipped at 7.7MB and decimated at runtime.
 This is the core reason CAUSTIC loads in well under a second.
 
-### 8.2 The one exception — Kenney Car Kit (CC0)
+### 8.2 Reusable third-party car models — two legal sources
 
-`CagriCatik/RaceTrack` ships Kenney's Car Kit, whose `License.txt` reads:
+**Source A — Kenney Car Kit (CC0).** Shipped by `CagriCatik/RaceTrack`; its `License.txt` reads:
 
 > License: (Creative Commons Zero, CC0) — http://creativecommons.org/publicdomain/zero/1.0/
 > You can use this content for personal, educational, and commercial purposes.
 
-CC0 is public domain, so these are safe to use **with attribution as a courtesy, not an
-obligation**. They are used only as **low-tier fallback models** and for the CRT/garage
-props. They are the reference silhouette, not the shipping hero asset.
+CC0 is public domain — usable with **no obligation at all**. Used for low-tier fallback
+models and garage/CRT props.
+
+**Source B — BMW M4 (CC BY 4.0).** Verified from `lukaizj/car-mod-saas/public/models/ATTRIBUTION.md`:
+
+> **Author:** 𝙎𝙍𝙏 𝙋𝙚𝙧𝙛𝙾𝙼𝙞𝙣𝙚™ — **License:** Creative Commons Attribution 4.0 International (CC BY 4.0)
+> **Source:** sketchfab.com/3d-models/bmw-m4-competition-m-package-5c0a2dafb1ad408d9fc9eeef9aee531b
+> **Changes:** Meshopt geometry compression + WebP textures, textures ≤1024px, geometry simplification disabled.
+
+CC BY 4.0 permits commercial use **provided you attribute the author and state your changes**
+— both met by the `CREDITS.md` entry and the embedded `asset.extras` block the source repo
+preserves in its derivative. So there is a genuinely usable, licence-clean 3.8MB web car here.
+
+**Project licence floor, now a build rule:** any third-party 3D model entering this repo must
+be **CC0 or CC BY**. A pre-commit hook fails the build on any binary blob >64KB without a
+matching `CREDITS.md` entry naming author + licence.
+
+**Excluded on licence grounds:** Audi RS6 (editorial/non-commercial) and Tesla Model 3
+(unverified upstream) from the same source. See §11.2.
+
+**Practical consequence:** because CAUSTIC's cars are procedural (§8.1), third-party models
+are only needed for the optional low-tier fallback — and both available sources are legally
+clear. The procedural route remains the default; the models are a safety net, not a crutch.
 
 ### 8.3 Explicitly excluded
 
@@ -672,13 +784,21 @@ CAUSTIC/
 | `SkeloGH/dragster` | Launch/gear state-machine structure (reimplemented) | MIT |
 | `DevSwist06/togai` | Track spline format + binary search `atDistance()`, and the project's verification discipline | Repo has no license; reimplemented |
 | `CagriCatik/RaceTrack` → Kenney | Car Kit GLB/FBX models, fallback tier only | **CC0 / public domain** |
-| `lukaizj/car-mod-saas` | GLB optimisation command set; material-slot mapping idea | Reimplemented; its `.glb` models are **not** reused (no licence) |
+| `lukaizj/car-mod-saas` | GLB optimisation command set (`@gltf-transform/cli` 4.4.1, Meshopt + WebP); material-slot mapping idea | Reimplemented. Its **BMW M4 is CC BY 4.0 and IS reusable** (§8.2); RS6 + Model 3 are not |
 
 ### 11.2 Not reused
 
 - `TeggTTV/drag-racing` — **all 31.5MB of art and audio.** No LICENSE = all rights reserved.
-- `lukaizj/car-mod-saas` `.glb` models (BMW M4, Tesla Model 3, Audi RS6) — no licence.
+- `lukaizj/car-mod-saas` **Audi RS6** — the repo's own attribution states it is an
+  *"editorial, non-commercial license… must not be used commercially or redistributed until
+  the asset owner and license are confirmed."* Excluded.
+- `lukaizj/car-mod-saas` **Tesla Model 3** — attribution says *"verify the upstream model
+  license and replace the asset if required."* Unverified. Excluded.
 - All six shell repos (§1.2) — never cloned.
+
+> **CORRECTION (v1.1):** the **BMW M4 in that repo is CC BY 4.0**, not unlicensed — see
+> §8.2 Source B. The earlier blanket "no licence" claim was wrong and has been fixed here and
+> in `CREDITS.md`.
 
 ### 11.3 GLB optimisation commands (for the fallback tier)
 
@@ -756,9 +876,17 @@ No claim ships without tool output behind it.
 
 ## 15. Scope explicitly excluded
 
-Deliberately not in v1, listed so it's a decision and not an omission: open world, licensed
-real cars, multiplayer, gacha/crates, mobile native builds, a backend or accounts,
-photo-real human drivers, and any third-party paid service. Free, local, source-only.
+Deliberately not in v1, listed so it's a decision and not an omission:
+
+- **Crates, gacha, spin wheels, lootboxes, daily-reward ladders, auctions.** The reference
+  set has all five. They are excluded deliberately, not overlooked — a randomised faucet
+  pays into the same economy as skill, and once it does, the fastest route to a fast car is
+  a slot machine rather than a good launch. See §7.0 Trap 2/3.
+- **An XP-and-level track.** Replaced by the rival ladder (§7.1).
+- Open world, licensed real cars, multiplayer, mobile native builds, a backend or accounts,
+  photo-real human drivers, and any third-party paid service.
+
+Free, local, source-only, MIT.
 
 ---
 
