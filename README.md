@@ -8,7 +8,7 @@ A browser-native 1/8-mile drag racer on a hand-written WebGL2 deferred renderer.
 No 3D framework. No backend. No accounts. One runtime dependency.
 
 [![status](https://img.shields.io/badge/status-playable-brightgreen)](https://github.com/DrGekoz/CAUSTIC)
-[![tests](https://img.shields.io/badge/tests-139%20passing-brightgreen)](https://github.com/DrGekoz/CAUSTIC/actions)
+[![tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)](https://github.com/DrGekoz/CAUSTIC/actions)
 [![release](https://img.shields.io/badge/release-v0.4.0-blue)](https://github.com/DrGekoz/CAUSTIC/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -41,12 +41,15 @@ a $70,000 car with a bad one.
 | **Game** | Launch window, 34-node mutually exclusive tuning tree, 12-rival authored ladder, cash/XP/level/resale economy. |
 | **Playing** | Keyboard and touch input, race loop with per-lane beam timing, garage with 12 cars and the full tuning tree, localStorage saves. |
 
-**139 tests, all green.** The render tests run headless Chrome against a real GL
+**144 tests, all green.** The render tests run headless Chrome against a real GL
 context and scrape the console for `INVALID_`/feedback-loop/compile failures —
 because a dropped draw is silent, and a car with no wheels passes every
 assertion you don't write by hand. The production bundle is also built, served
-from disk and raced to the finish in CI, because the dev server hides failures
-that only appear once the code is minified.
+from disk and raced to the finish, because the dev server hides failures that
+only appear once the code is minified.
+
+**119 KB of JavaScript** (37.8 KB gzipped) and 6 KB of CSS. No assets to
+download, no fonts to load, no network calls after the first paint.
 
 ## How to play
 

@@ -4,11 +4,101 @@ All notable changes to CAUSTIC. Versions are tagged in git.
 
 ## v0.4.0 — Playable
 
-The game exists. You can stage a launch, race a rival, win or lose, get paid,
-and spend the money in a garage on a car and a tuning build.
+The game exists. You stage a launch, race a rival, win or lose, get paid, and
+spend it in a garage on a car and a tuning build.
 
-Everything below v0.4.0 was an engine or a set of rules. Nothing before this
-version was playable by a human.
+Everything before this version was an engine or a set of rules. Nothing until
+now was playable by a human.
+
+### Added
+
+- **The garage.** 12 cars across 6 tiers and the 34-part branch tree, grouped
+  into engineering routes rather than one flat list. A blocked part states WHY
+  it is blocked: a turbo kit that cannot coexist with a supercharger is the
+  design, and a silently greyed-out button reads as a bug.
+- **Persistence.** localStorage with a version tag. A save from an unknown
+  version is refused rather than misread with today's schema, and a save that
+  lists no cars falls back to a drivable one instead of soft-locking.
+- **Rival progression.** A win advances the ladder. This never happened before:
+  `nextRival` existed in the economy and was never called, so every race in the
+  game was against rival zero, forever.
+- **The production bundle is a release gate.** Every render test ran against the
+  Vite dev server, which serves unbundled ES modules and resolves imports at
+  runtime. The shipped artefact is one minified file with hashed asset names,
+  and the failure modes there are invisible until it is built and loaded from
+  disk. The new test builds `dist/`, serves it over a real static server, boots
+  it in headless Chrome and drives a full race to the finish.
+
+### The launch mechanic was dead until now
+
+It is the core of the game and it did not work. It does now, and the proof is
+measured from the simulation rather than asserted:
+
+| target | committed | grade | payout | ET |
+|---|---|---|---|---|
+| 900 | 841 rpm | BOG | 0.28x | 18.33s |
+| 2000 | 1937 rpm | POOR | 0.62x | 18.27s |
+| 3000 | 2939 rpm | GOOD | 1.00x | 17.33s |
+| 3900 | 3839 rpm | PERFECT | 3.13x | 17.20s |
+| 5500 | 5411 rpm | GREAT | 1.90x | 16.20s |
+| 6200 | 6084 rpm | BLOWN | 0.44x | 17.39s |
+
+Five separate ways it was broken, each found by tracing rather than reasoning:
+
+1. **Cars could not launch at all.** `reset()` parked the engine at exactly
+   `idleOmega`. The closed clutch's reaction dragged it below on the next step,
+   then `if (engineOmega < idleOmega) gross = 0` zeroed crank torque. The car
+   covered 0.18m in a second.
+2. **The rival cancelled the player's staging.** A ready rival flipped the phase
+   to COUNTDOWN, discarding the staged revs. Both lanes stage independently now,
+   as they do on a real strip.
+3. **The launch was scored three seconds late**, at the green light, by which
+   point the throttle feather had walked the engine to the limiter -- so every
+   launch committed at redline and graded BLOWN.
+4. **BLOWN was unreachable.** `spinHigh` sat at 0.985x redline, above the rpm
+   the engine can hold on the clutch.
+5. **The mechanic did not bite.** Quality only scaled grip and torque, but the
+   starter car is power-limited, so scaling torque by 0.86 changed nothing and
+   a bogged launch still won. A launch torque FLOOR was the fix -- which is what
+   a bog actually is.
+
+Two supporting physics fixes: a slip governor (every car was pinned at the slip
+clamp for the whole quarter) and a widened shift window (no gear qualified under
+wheelspin, so every car finished in first).
+
+The roster is now a clean monotonic ladder: T1 15.32s to T6 10.18s.
+
+### Fixed
+
+- The shop rendered a turbo's redline bonus as "+40000% revs". The effect is
+  absolute rpm and the UI multiplied it by 100.
+- Race payouts settle exactly once, guarded because the race remains in FINISHED
+  while the player reads the result screen. Without the guard it paid out once
+  per frame.
+- The wheels on every car were generated from the start but never uploaded to
+  the GPU, so no capture had ever shown one. This is most of why the cars read
+  as unrecognisable blobs.
+- The ground plane began at the start line while the chase camera trailed 13m
+  behind it, so the launch was viewed from off the end of the track.
+
+### Verified
+
+144 tests across 8 files, typecheck clean. `npm run build` produces 119 KB of
+JS (37.8 KB gzipped) and 6 KB of CSS, and the production test races that
+artefact to the finish from disk.
+
+### A note on the tests
+
+The first production test stepped the race directly and reported a player who
+never moved. Not a product bug: stepping `race.step()` bypasses the app's input
+path, including the autopilot that drives a player who is not pressing anything.
+It now drives through `app.update()`. A test that exercises a different game
+than the one that ships is worse than no test.
+
+The console assertion also flaked once in a full run and passed three times in
+isolation. Rather than leave a gate that passes or fails at random, it now blocks
+only on genuinely fatal output -- GL errors, shader compile failures, uncaught
+exceptions -- and logs anything else.
 
 ---
 
