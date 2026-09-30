@@ -444,3 +444,4 @@ export const CARS: CarSpec[] = RAW.map(toSpec);
 export const CAR_BY_ID: Record<string, CarSpec> = Object.fromEntries(
   CARS.map((c) => [c.id, c]),
 );
+export type { CarSpec };
