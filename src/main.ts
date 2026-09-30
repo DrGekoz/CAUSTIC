@@ -13,9 +13,14 @@ import { buildCar, type CarMesh, type CarSpec } from './geometry/Car';
 import { buildStrip, buildLights, uploadStrip, buildLampBar, LANE_CENTRE } from './world/Strip';
 import { Race, type RaceInput } from './game/Race';
 import { CAR_BY_ID } from './game/data/cars';
-import { RIVALS, type BranchId } from './game/Economy';
+import type { BranchId } from './game/Economy';
 import { InputManager, TouchControls } from './ui/Input';
 import { LaunchHud } from './ui/LaunchHud';
+import { GarageUI } from './ui/Garage';
+import { save as saveGame, load as loadGame } from './game/Save';
+import {
+  newPlayer, applyRace, resolveRace, RIVALS, type PlayerState,
+} from './game/Economy';
 
 declare global {
   interface Window {
@@ -56,6 +61,13 @@ class App {
   demoLaunchRpm = 3900;
   /** Display name of the current rival, for the result panel. */
   rivalName = 'RIVAL';
+  /** Persistent progression: cash, garage, tuning, XP. */
+  player: PlayerState = newPlayer();
+  garage: GarageUI | null = null;
+  /** True once the current race has been paid out, so it pays exactly once. */
+  private raceSettled = false;
+  /** Seeds the rival's ET variation; incremented once per settled race. */
+  private raceSettleCount = 0;
   built: CarMesh[] = [];
   specs: CarSpec[] = [];
   gpu: Record<string, GPUMesh> = {};
@@ -364,6 +376,79 @@ class App {
   restart(): void {
     this.race?.begin();
     this.raceTime = 0;
+    this.raceSettled = false;
+  }
+
+  toggleGarage(): void {
+    if (!this.garage) return;
+    this.garage.visible = !this.garage.visible;
+  }
+
+  /**
+   * Swap the car in the queue. The Race is constructed from car specs and a
+   * tuning set, so changing either means a new Race -- not mutating the one in
+   * flight, which would leave its timing and its vehicle out of step.
+   */
+  selectCar(carId: string): void {
+    if (carId === this.activeCarId) return;
+    this.activeCarId = carId;
+    this.rebuildRace();
+  }
+
+  /** Re-apply a restored save's car and rival without going through selectCar. */
+  applyLoadedSelection(): void {
+    this.rebuildRace();
+  }
+
+  private rebuildRace(): void {
+    const spec = CAR_BY_ID[this.activeCarId];
+    if (!spec) return;
+    const tuning = new Set(
+      this.player.garage.find((g) => g.carId === this.activeCarId)?.tuning ?? [],
+    );
+    const rival = CAR_BY_ID[this.rivalCarId];
+    const race = new Race(spec, tuning, rival, new Set<BranchId>(), this.rivalSkill);
+    race.begin();
+    this.race = race;
+    this.vehicles = [race.player.vehicle, race.rival.vehicle];
+    this.rivalName = RIVALS[this.rivalSkill]?.name ?? 'RIVAL';
+    this.raceSettled = false;
+  }
+
+  /**
+   * Pay out a finished race -- exactly once.
+   *
+   * The guard matters: the race stays in FINISHED for as long as the player
+   * sits on the result screen, and without it the payout would be applied once
+   * per frame.
+   */
+  private settleRaceIfDone(): void {
+    const race = this.race;
+    if (!race || this.raceSettled) return;
+    if (race.phase !== 'FINISHED') return;
+    const snap = race.snapshot();
+    const playerEt = snap.playerTiming.et;
+    const rivalEt = snap.rivalTiming.et;
+    if (!(playerEt > 0) || !(rivalEt > 0)) return;
+
+    const rival = RIVALS[this.rivalSkill] ?? RIVALS[0];
+    // A deterministic seed from the race number, so the rival's ET varies
+    // band to band but a replay of the same race is reproducible.
+    const seed = this.raceSettleCount;
+    this.raceSettleCount++;
+    const outcome = resolveRace(
+      playerEt,
+      rival,
+      snap.playerTiming.launch?.multiplier ?? 1,
+      seed,
+    );
+    const entry = this.player.garage.find((g) => g.carId === this.activeCarId);
+    if (entry) {
+      applyRace(this.player, outcome, rival, entry, snap.playerTiming.launch?.grade === 'PERFECT');
+    }
+    this.raceSettled = true;
+    this.garage?.setState(this.player, this.activeCarId);
+    saveGame(this.player, this.activeCarId, this.rivalSkill);
   }
 
   frame(now: number): void {
@@ -373,6 +458,8 @@ class App {
     this.renderer.handleResize();
     this.raceTime += dt;
     if (this.input.pressed('restart')) this.restart();
+    if (this.input.pressed('garage')) this.toggleGarage();
+    this.settleRaceIfDone();
     this.update(dt);
     this.buildDrawList(dt);
 
@@ -464,6 +551,23 @@ if (typeof document !== 'undefined') {
       app.hud = new LaunchHud(root);
       app.touch = new TouchControls(root);
       app.touch.visible = 'ontouchstart' in window;
+
+      // Restore a save if there is one, THEN build the garage against it. The
+      // garage is where cash is spent, so it has to see the real player state.
+      const restored = loadGame();
+      if (restored) {
+        app.player = restored.state;
+        app.activeCarId = restored.activeCarId;
+        app.rivalSkill = restored.rivalIndex;
+        app.applyLoadedSelection();
+      }
+      app.garage = new GarageUI(root, app.player, app.activeCarId, {
+        onSelectCar: (carId) => app.selectCar(carId),
+        onChange: () => {
+          app.garage?.setState(app.player, app.activeCarId);
+          saveGame(app.player, app.activeCarId, app.rivalSkill);
+        },
+      });
     } catch (e) {
       const box = document.getElementById('err');
       if (box) {

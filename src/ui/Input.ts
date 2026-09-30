@@ -22,6 +22,8 @@ const KEY_MAP: Record<string, string> = {
   KeyQ: 'shiftDown',
   KeyL: 'clutch',
   KeyR: 'restart',
+  KeyG: 'garage',
+  KeyC: 'carPicker',
   Escape: 'pause',
   KeyT: 'autoclutch',
 };
