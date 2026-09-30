@@ -61,7 +61,12 @@ export function bandsForRedline(redline: number, peakRpm: number): LaunchBands {
     goodHigh: redline * 0.68,
     perfectLow: redline * 0.5,
     perfectHigh: redline * 0.8,
-    spinHigh: redline * 0.985,
+    // Just under the rev limiter, but reachable. At 0.985 the blown band sat
+    // ABOVE the rpm the engine can actually hold on the clutch (~0.985 of
+    // redline), so BLOWN could never be triggered at all and the top of the
+    // mechanic was dead. 0.93 is comfortably reachable and still clearly
+    // "too much".
+    spinHigh: redline * 0.93,
   };
 }
 

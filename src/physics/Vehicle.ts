@@ -147,6 +147,13 @@ export interface LaunchModifiers {
   traction: number;
   /** Engine torque multiplier from launch quality, 0.86..1.25. */
   torque: number;
+  /**
+   * Hard ceiling on crank torque DURING the launch window, as a fraction of
+   * peak. A bogged launch cannot deliver much torque at all; a perfect one has
+   * no ceiling. This is what makes the mechanic matter on a power-limited car
+   * rather than only on a grip-limited one.
+   */
+  torqueFloor: number;
   /** Seconds of launch window remaining. */
   timeLeft: number;
 }
@@ -163,7 +170,7 @@ export class Vehicle {
   shiftState: ShiftState = 'idle';
   shiftTimer = 0;
   wheels: WheelState[] = [];
-  launch: LaunchModifiers = { traction: 1, torque: 1, timeLeft: 0 };
+  launch: LaunchModifiers = { traction: 1, torque: 1, torqueFloor: 1, timeLeft: 0 };
   /** Over-rev / wheelspin heat, 0..1. */
   heat = 0;
   finished = false;
@@ -274,7 +281,10 @@ export class Vehicle {
     this.lateralSpeed = 0;
     this.yawRate = 0;
     this.gear = gear;
-    this.engineOmega = (this.cfg.idleRpm * 2 * Math.PI) / 60;
+    // A touch above idle: the closed clutch's reaction immediately drags the
+    // engine down, and starting it exactly at idle means it is below idle
+    // within one step.
+    this.engineOmega = (this.cfg.idleRpm * 1.12 * 2 * Math.PI) / 60;
     this.shiftState = 'idle';
     this.shiftTimer = 0;
     this.heat = 0;
@@ -285,7 +295,7 @@ export class Vehicle {
     this.lastLateralAccel = 0;
     this.tcCut = 0;
     this.clutchSlip = this.engineOmega;
-    this.launch = { traction: 1, torque: 1, timeLeft: 0 };
+    this.launch = { traction: 1, torque: 1, torqueFloor: 1, timeLeft: 0 };
     for (const w of this.wheels) {
       w.load = 0;
       w.slipRatio = 0;
@@ -301,11 +311,27 @@ export class Vehicle {
   }
 
   /** Open the launch window; quality 0..1. */
+  /**
+   * Begin the launch window with a quality in 0..1.
+   *
+   * Launch quality has to bite on a POWER-limited car, not just a grip-limited
+   * one, or the mechanic does nothing. Multiplying torque by 0.86 for 1.8s
+   * changed almost nothing on a car that was torque-bound rather than
+   * traction-bound, and a bogged launch still beat a perfect one.
+   *
+   * So the window also carries a TORQUE FLOOR: a bad launch physically cannot
+   * deliver much crank torque for its duration, which is what a bog actually
+   * is -- the engine falls off the cam, the tyres hook up at idle, and the car
+   * crawls. A perfect launch has no such floor.
+   */
   beginLaunch(quality: number, seconds = 1.8): void {
     const q = Math.max(0, Math.min(1, quality));
     this.launch = {
       traction: 0.78 + q * 0.55,
       torque: 0.86 + q * 0.39,
+      // 0.18 of peak crank torque at q=0, full torque by q=0.55. A bad launch
+      // is not "a good launch, slightly worse" -- it barely drives at all.
+      torqueFloor: 0.18 + Math.max(0, q - 0.1) * 1.14,
       timeLeft: seconds,
     };
     this.shiftState = 'launching';
@@ -466,8 +492,21 @@ export class Vehicle {
 
     // Gross = what the engine makes. Net = gross minus internal drag.
     const friction = 12 + this.rpm * 0.0045;
+    // A bad launch physically cannot deliver crank torque, on top of the
+    // usual scaling. Without this the mechanic did nothing on a power-limited
+    // car: scaling torque by 0.86 barely registers when the engine, not the
+    // tyres, is the binding constraint, so a bogged launch still won.
     let gross = input.throttle * this.cfg.peakTorque * eff * this.launch.torque;
-    if (this.engineOmega < idleOmega) gross = 0;
+    if (this.launch.timeLeft > 0) {
+      const launchCap = this.launch.torqueFloor * this.cfg.peakTorque;
+      if (gross > launchCap) gross = launchCap;
+    }
+    // Only a genuinely stopped engine makes no torque. Comparing against
+    // idleOmega itself meant any car sitting at idle -- which is where BOTH
+    // cars sit before a drag race -- read as stopped, so the engine made zero
+    // torque from the second step onward, the clutch had nothing to transmit
+    // and axleTorque went to zero. No launch was ever possible.
+    if (this.engineOmega < idleOmega * 0.35) gross = 0;
     const net = input.throttle < 0.02 ? -friction * 2.2 : gross - friction;
 
     const driven = this.drivenIndices();
@@ -542,6 +581,39 @@ export class Vehicle {
       } else {
         this.tcCut = Math.max(0, this.tcCut - dt * 12);
       }
+
+      // Slip governor. The torque cap above limits how much torque reaches the
+      // tyre, but it cannot stop the wheel accelerating past the peak, where
+      // the magic formula produces LESS force than at peak -- more slip, less
+      // grip, and the car goes nowhere while the slip ratio pins at its clamp.
+      // Target the peak directly and cut on the excess. This is what makes a
+      // launch settle into a chirp instead of running away.
+      //
+      // Only govern once the car is actually moving. A standing start is slip
+      // 1.0 by definition and slip infinity for the first instant, so
+      // governing from a standstill fights the launch itself: the cut hit 0.97
+      // on the first step and five of twelve cars never moved at all.
+      // Gate on the WHEEL, not the car. A standing start is slip 1.0 by
+      // definition, so gating on car speed left the launch -- the moment slip
+      // matters most -- completely ungovened. Gate on whether the driven wheel
+      // is genuinely spinning faster than the road.
+      const wheelSpinning = driven.some((i) => this.wheels[i].omega * WHEEL_RADIUS > Math.abs(this.speed) + 2.5);
+      if (this.tractionControl && (Math.abs(this.speed) > 1.5 || wheelSpinning)) {
+        const peak = Math.max(0.02, this.cfg.tire.peakSlipRatio);
+        let worst = 0;
+        for (const i of driven) {
+          const ex = Math.abs(this.wheels[i].slipRatio) / peak;
+          if (ex > worst) worst = ex;
+        }
+        if (worst > 1) {
+          // Saturating rather than linear: past the peak the force gain falls
+          // off, so a linear cut would be either far too weak or slam to zero
+          // and oscillate. 1/(1+k*e) settles instead.
+          const cut = 1 - 1 / (1 + (worst - 1) * 2.4);
+          this.tcCut = Math.max(this.tcCut, Math.min(0.92, cut));
+        }
+      }
+
       axleTorque *= 1 - this.tcCut;
     } else {
       this.tcCut = Math.max(0, this.tcCut - dt * 6);
@@ -566,10 +638,16 @@ export class Vehicle {
       const curRatio = this.cfg.gearRatios[this.gear - 1] ?? 0;
       if (nextRatio > 0 && curRatio > 0) {
         const nextRpm = (gearedRpm * nextRatio) / curRatio;
+        // The upper bound used to be redline * 0.995, which demanded the next
+        // gear land UNDER the limiter. A drag car runs most of a pass in
+        // wheelspin, where wheel speed is 3x road speed, so first gear was
+        // already geared past the redline and no gear ever qualified: every
+        // car spent the whole quarter in first. Allow a modest overshoot --
+        // the tyres, not the engine, are the limit off the line.
         this.shiftReady =
           gearedRpm > curve.redline * 0.9 &&
           nextRpm > curve.redline * SHIFT_FLOOR &&
-          nextRpm < curve.redline * 0.995;
+          nextRpm < curve.redline * 1.6;
       }
     }
   }
