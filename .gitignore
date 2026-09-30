@@ -5,3 +5,4 @@ dist/
 .vite/
 tests/_probe.test.ts
 tests/_diag.ts
+tests/_shot.ts

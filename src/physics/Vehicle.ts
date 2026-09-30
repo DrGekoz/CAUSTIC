@@ -185,6 +185,8 @@ export class Vehicle {
   /** True while the brake switch has auto-released the clutch. */
   autoClutch = false;
   /** Traction-control cut, 0..1, where 1 is full intervention. */
+  /** Last commanded brake demand, 0..1. The renderer uses it for brake lights. */
+  brakeInput = 0;
   tcCut = 0;
   /** 0 disables traction control entirely (drift/competition mode). */
   tractionControl = true;
@@ -320,6 +322,7 @@ export class Vehicle {
    */
   step(dt: number, input: VehicleInputs): void {
     if (!(dt > 0) || !Number.isFinite(dt)) return;
+    this.brakeInput = input.brake;
 
     this.stepShifting(dt, input);
     this.updateLoads();

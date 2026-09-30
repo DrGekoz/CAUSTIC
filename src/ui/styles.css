@@ -121,3 +121,8 @@ body {
   #speed .val { font-size: 34px; }
   #rpm { bottom: calc(4vh + 78px); }
 }
+
+/* Presentation mode: hides the debug readout and title card. Toggled from the
+   console or by the screenshot harness, so a capture is the game and nothing
+   else. */
+body.present #hud { display: none; }

@@ -7,10 +7,11 @@
 
 import { mat4, mat3 } from 'gl-matrix';
 import { Renderer, DEFAULT_FRAME, type DrawItem, type QualityTier } from './render/Renderer';
+import { NIGHT_GRADE } from './world/NightGrade';
 import { GPUMesh } from './render/GL';
-import { buildCar, toVehicleConfig, type CarMesh } from './geometry/Car';
+import { buildCar, toVehicleConfig, type CarMesh, type CarSpec } from './geometry/Car';
 import { CARS } from './game/data/cars';
-import { buildStrip, buildLights, uploadStrip, LANE_CENTRE } from './world/Strip';
+import { buildStrip, buildLights, uploadStrip, buildLampBar, LANE_CENTRE } from './world/Strip';
 import { Vehicle, NO_INPUT, type VehicleInputs } from './physics/Vehicle';
 
 declare global {
@@ -32,8 +33,12 @@ class App {
   renderer!: Renderer;
   vehicles: Vehicle[] = [];
   built: CarMesh[] = [];
+  specs: CarSpec[] = [];
   gpu: Record<string, GPUMesh> = {};
   carMeshes: GPUMesh[] = [];
+  lampMesh: GPUMesh | null = null;
+  lampMats: Float32Array[] = [];
+  lampNorms: Float32Array[] = [];
   modelMats: Float32Array[] = [];
   normalMats: Float32Array[] = [];
   /**
@@ -69,14 +74,15 @@ class App {
 
   private accumulator = 0;
   private lastNow = 0;
-  private input: VehicleInputs = { ...NO_INPUT };
   items: DrawItem[] = [];
+  /** Seconds since boot, used by the demo autopilot. */
+  raceTime = 0;
   frameCount = 0;
 
   init(canvas: HTMLCanvasElement): void {
     this.renderer = new Renderer(canvas);
     this.renderer.lights = buildLights();
-    this.renderer.frame = { ...DEFAULT_FRAME };
+    this.renderer.frame = { ...DEFAULT_FRAME, ...NIGHT_GRADE };
 
     const gl = this.renderer.ctx.gl;
     this.gpu = uploadStrip(gl, buildStrip());
@@ -87,11 +93,18 @@ class App {
     for (const [i, spec] of [player, rival].entries()) {
       const built = buildCar(spec);
       this.built.push(built);
+      this.specs.push(spec);
       this.gpu[`car${i}`] = new GPUMesh(gl, built.body.positions, built.body.normals, built.body.uvs, built.body.indices);
       this.carMeshes.push(this.gpu[`car${i}`]);
+      if (!this.lampMesh) {
+        const bar = buildLampBar(spec.width * 0.32, 0.09);
+        this.lampMesh = new GPUMesh(gl, bar.positions, bar.normals, bar.uvs, bar.indices);
+      }
       this.vehicles.push(new Vehicle(toVehicleConfig(spec)));
       this.modelMats.push(new Float32Array(16));
       this.normalMats.push(new Float32Array(9));
+      this.lampMats.push(new Float32Array(16));
+      this.lampNorms.push(new Float32Array(9));
     }
     for (const v of this.vehicles) v.reset(1);
   }
@@ -101,11 +114,32 @@ class App {
     this.accumulator += Math.min(dtReal, 0.25);
     let steps = 0;
     while (this.accumulator >= FIXED_DT && steps < 12) {
-      for (const v of this.vehicles) v.step(FIXED_DT, this.input);
+      for (const v of this.vehicles) v.step(FIXED_DT, this.demoInput(v));
       this.accumulator -= FIXED_DT;
       steps++;
     }
     if (steps >= 12) this.accumulator = 0;
+  }
+
+  /**
+   * A simple autopilot so the scene is alive without input. It stages on the
+   * clutch to a launch rpm, dumps it, and then shifts at the redline -- which is
+   * exactly what a player does, and it exercises every part of the drivetrain.
+   */
+  private demoInput(v: Vehicle): VehicleInputs {
+    // Stage: hold the clutch and build revs toward the launch band.
+    if (this.raceTime < 0.7) {
+      return {
+        ...NO_INPUT,
+        throttle: Math.min(1, this.raceTime / 0.5),
+        clutch: true,
+      };
+    }
+    // Then dump the clutch and stay on the throttle, shifting at the redline.
+    if (v.rpm > v.cfg.curve.redline * 0.95 && v.shiftReady) {
+      return { ...NO_INPUT, throttle: 1, shiftUp: true };
+    }
+    return { ...NO_INPUT, throttle: 1 };
   }
 
   buildDrawList(): void {
@@ -141,6 +175,7 @@ class App {
     push(this.gpu.stagingBeam, idm, idn, 4, [0.85, 0.84, 0.8], 0.0, 0.4);
     push(this.gpu.walls, idm, idn, 0, [0.1, 0.1, 0.11], 0.0, 0.7);
     push(this.gpu.lightTowers, idm, idn, 5, [0.22, 0.23, 0.25], 0.9, 0.42);
+    push(this.gpu.startFloods, idm, idn, 5, [0.3, 0.3, 0.32], 0.85, 0.38);
     push(this.gpu.trees, idm, idn, 5, [0.12, 0.12, 0.13], 0.8, 0.35);
     push(this.gpu.stands, idm, idn, 0, [0.14, 0.14, 0.16], 0.0, 0.8);
     push(this.gpu.barriers, idm, idn, 5, [0.3, 0.31, 0.33], 0.85, 0.4);
@@ -148,6 +183,7 @@ class App {
     // Cars. Paint is material 1: metal flake plus clearcoat.
     for (let i = 0; i < this.vehicles.length; i++) {
       const v = this.vehicles[i];
+      const spec = this.specs[i];
       const lane = i === 0 ? LANE_CENTRE : -LANE_CENTRE;
       const z = v.distance;
       const yaw = 0;
@@ -171,6 +207,27 @@ class App {
         0.55,
         Math.min(1, Math.abs(wheelSpin) * 0.5),
       );
+
+      // Brake-light bar on the rear face. Emissive but restrained: the G-buffer
+      // boosts lens edges by 1.55x, so the base value has to stay low or the
+      // bloom turns the whole rear of the car into a white blob.
+      const lm = this.lampMats[i];
+      const ln = this.lampNorms[i];
+      const lampY = 0.62;
+      const lampZ = z - spec.length * 0.5 - 0.02;
+      mat4.identity(lm);
+      mat4.translate(lm, lm, [lane, lampY, lampZ]);
+      mat4.rotateY(lm, lm, yaw);
+      mat3.normalFromMat4(ln as unknown as mat3, lm as unknown as mat4);
+      if (this.lampMesh) {
+        const braking = v.brakeInput > 0.05 ? 1 : 0.12;
+        push(
+          this.lampMesh, lm, ln, 3,
+          [0.35, 0.02, 0.02], 0.0, 0.3,
+          [braking * 1.6, braking * 0.06, braking * 0.04],
+          0, 0, 0,
+        );
+      }
     }
   }
 
@@ -179,22 +236,27 @@ class App {
     this.lastNow = now;
 
     this.renderer.handleResize();
+    this.raceTime += dt;
     this.update(dt);
     this.buildDrawList();
 
-    // Chase camera: sit behind and slightly to the side of the player's car.
+    // Chase camera. Anchored BEHIND the car and looking at it, with the look
+    // target pushed down the strip so the road ahead stays in frame.
     const v = this.vehicles[0];
-    const camX = LANE_CENTRE + 1.4;
-    const camY = 2.05;
-    const camZ = Math.max(2, v.distance - 8.2);
+    // Broadcast angle: high, well back, and angled down the strip. Low chase
+    // cameras put the road surface across the lower third of frame and lose the
+    // cars behind trackside furniture.
+    const camX = 0.9;
+    const camY = 4.4;
+    const camZ = v.distance - 12.0;
     this.renderer.cameraPos = [camX, camY, camZ];
     mat4.lookAt(
       this.renderer.view,
       new Float32Array([camX, camY, camZ]),
-      new Float32Array([LANE_CENTRE, 0.7, v.distance + 6]),
+      new Float32Array([0, 0.5, v.distance + 18]),
       new Float32Array([0, 1, 0]),
     );
-    this.renderer.updateMatrices((52 * Math.PI) / 180, 0.15, 900);
+    this.renderer.updateMatrices((42 * Math.PI) / 180, 0.3, 900);
 
     this.renderer.render(this.items, dt * 1000, now);
     this.frameCount++;

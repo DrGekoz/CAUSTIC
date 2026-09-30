@@ -774,9 +774,15 @@ uniform sampler2D uScene;
 uniform vec2 uTexel;
 uniform float uBlend;
 void main() {
-  // Bilateral-ish upsample: blend the half-res volumetric into the scene using
-  // a simple depth-free box, which is fine for a smooth fog field.
-  vec3 vol = texture(uSource, vUV).rgb;
+  // A 5-tap tent filter on the half-res fog before compositing. The raymarch
+  // jitters its start offset per pixel to trade banding for noise, so without
+  // this the fog reads as speckle rather than haze.
+  vec2 o = uTexel;
+  vec3 vol = texture(uSource, vUV).rgb * 0.4;
+  vol += texture(uSource, vUV + vec2( o.x, 0.0)).rgb * 0.15;
+  vol += texture(uSource, vUV + vec2(-o.x, 0.0)).rgb * 0.15;
+  vol += texture(uSource, vUV + vec2(0.0,  o.y)).rgb * 0.15;
+  vol += texture(uSource, vUV + vec2(0.0, -o.y)).rgb * 0.15;
   vec3 scene = texture(uScene, vUV).rgb;
   fragColor = vec4(scene + vol * uBlend, 1.0);
 }`;

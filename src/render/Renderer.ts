@@ -515,6 +515,7 @@ export class Renderer {
     this.renderLighting();
     this.renderSSR();
     this.renderVolumetrics();
+    this.compositeVolumetrics();
     this.renderTAA();
     this.renderBloom();
     this.renderComposite();
@@ -690,6 +691,31 @@ export class Renderer {
     this.uploadLights(p);
     p.setVec3('uFogColor', ...this.frame.fogColor);
     this.fsTri.draw();
+  }
+
+  /**
+   * Fold the half-res fog into the lit scene. Done as a separate additive pass
+   * rather than inside the lighting shader because the volumetric target is half
+   * resolution and tent-filtered, which is much cheaper than marching the fog
+   * per light per pixel at full res.
+   */
+  private compositeVolumetrics(): void {
+    if (!this.volumetricTarget) return;
+    const gl = this.ctx.gl;
+    this.lighting.bind(false);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    const p = this.pUpsample;
+    p.use();
+    this.bindTex(0, this.volumetricTarget.textures[0]);
+    p.setInt('uSource', 0);
+    this.bindTex(1, this.volumetricTarget.textures[0]);
+    p.setInt('uScene', 1);
+    p.setVec2('uTexel', 1 / this.volumetricTarget.width, 1 / this.volumetricTarget.height);
+    p.setFloat('uBlend', 1.0);
+    this.fsTri.draw();
+    gl.disable(gl.BLEND);
   }
 
   private renderTAA(): void {
